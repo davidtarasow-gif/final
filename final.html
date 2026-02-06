@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Lacy Chat для Moblin</title>
+<style>
+body {
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  background: transparent; /* фон прозрачный автоматически */
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+#chat-container {
+  position: fixed;
+  bottom: 20px;
+  left: 20px;
+  width: 380px;
+  max-height: 65vh;
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 6px;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.message {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 16px;
+  background: rgba(0,0,0,0.25);
+  font-size: 16px;
+  line-height: 1.3;
+  opacity: 0;
+  transform: translateX(-30px) scale(0.9);
+  animation: slideBounce 0.6s forwards;
+}
+
+@keyframes slideBounce {
+  0% { opacity: 0; transform: translateX(-30px) scale(0.8); }
+  60% { opacity: 1; transform: translateX(0) scale(1.05); }
+  100% { transform: translateX(0) scale(1); }
+}
+
+.username {
+  font-weight: bold;
+  background: linear-gradient(90deg, #ff7eb9, #ffb87e, #7efff5, #ff7eb9);
+  background-size: 300% 100%;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: gradientMove 4s linear infinite;
+}
+
+@keyframes gradientMove {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+.badge {
+  width: 22px;
+  height: 22px;
+  transition: transform 0.3s;
+}
+
+.alert-badge {
+  transform: scale(1.5) rotate(15deg);
+  animation: badgePop 0.5s forwards;
+}
+
+@keyframes badgePop {
+  0% { transform: scale(1.5) rotate(15deg); }
+  50% { transform: scale(1.8) rotate(-15deg); }
+  100% { transform: scale(1.2) rotate(0deg); }
+}
+
+.flash {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(255,255,255,0.3);
+  pointer-events: none;
+  opacity: 0;
+  animation: flash 0.4s forwards;
+}
+
+@keyframes flash {
+  0% { opacity: 0.5; }
+  100% { opacity: 0; }
+}
+
+audio { display: none; }
+</style>
+</head>
+<body>
+<div id="chat-container"></div>
+<div id="flash-container"></div>
+
+<audio id="alert-sound" src="https://freesound.org/data/previews/170/170138_2437358-lq.mp3"></audio>
+
+<script>
+// ================= НАСТРОЙКИ =================
+const channelName = "savedatsaint"; // Вставь свой ник Twitch
+const oauthToken = "oauth:zajoiyk86nyf2pe3zc7j28lq4ifh94"; // Вставь токен с oauth.ftk.li
+
+const chatContainer = document.getElementById('chat-container');
+const flashContainer = document.getElementById('flash-container');
+const alertSound = document.getElementById('alert-sound');
+
+// ================= ФУНКЦИЯ ДОБАВЛЕНИЯ СООБЩЕНИЯ =================
+function addMessage(username, badges, message, isAlert=false) {
+  const msgDiv = document.createElement('div');
+  msgDiv.classList.add('message');
+
+  badges.forEach(url => {
+    const img = document.createElement('img');
+    img.src = url;
+    img.className = 'badge';
+    if(isAlert) img.classList.add('alert-badge');
+    msgDiv.appendChild(img);
+  });
+
+  const nameSpan = document.createElement('span');
+  nameSpan.className = 'username';
+  nameSpan.textContent = username + ':';
+  msgDiv.appendChild(nameSpan);
+
+  const textSpan = document.createElement('span');
+  textSpan.textContent = ' ' + message;
+  msgDiv.appendChild(textSpan);
+
+  chatContainer.prepend(msgDiv); // новые сообщения появляются сразу, без задержки
+
+  if(isAlert) {
+    alertSound.play();
+    const flash = document.createElement('div');
+    flash.classList.add('flash');
+    flashContainer.appendChild(flash);
+    setTimeout(() => flash.remove(), 400);
+  }
+
+  // Сообщение исчезает через 2 минуты (120000 мс)
+  setTimeout(() => {
+    msgDiv.style.transition = 'opacity 0.5s, transform 0.5s';
+    msgDiv.style.opacity = '0';
+    msgDiv.style.transform = 'translateX(20px) scale(0.8)';
+    setTimeout(() => msgDiv.remove(), 500);
+  }, 120000);
+}
+
+// ================= ПОДКЛЮЧЕНИЕ К TWITCH IRC =================
+const ws = new WebSocket('wss://irc-ws.chat.twitch.tv:443');
+
+ws.onopen = () => {
+  ws.send(`PASS oauth:${oauthToken}\r\n`);
+  ws.send(`NICK ${channelName}\r\n`);
+  ws.send(`JOIN #${channelName}\r\n`);
+};
+
+ws.onmessage = (event) => {
+  const data = event.data;
+  if(data.startsWith("PING")) {
+    ws.send("PONG :tmi.twitch.tv\r\n");
+    return;
+  }
+
+  if(data.includes('PRIVMSG')) {
+    const match = data.match(/:(.+?)!.+?@.+?\.tmi\.twitch\.tv PRIVMSG #.+? :(.*)/);
+    if(match) {
+      const username = match[1];
+      const message = match[2];
+
+      const badges = [];
+      if (data.includes('mod=1')) badges.push('https://static-cdn.jtvnw.net/badges/v1/4c1d63c7-8d59-46e0-94a3-3a3ff550b232/1');
+      if (data.includes('subscriber=1')) badges.push('https://static-cdn.jtvnw.net/badges/v1/9e2f6e4a-1f3f-44b8-a2d7-fb22f3653e88/1');
+      if (username.toLowerCase() === channelName.toLowerCase()) badges.push('https://static-cdn.jtvnw.net/badges/v1/3f7a0e1d-0a88-4f8e-b42e-7e2a1a81d0b0/1');
+
+      const isAlert = /sub|donate|bits/i.test(message);
+
+      addMessage(username, badges, message, isAlert);
+    }
+  }
+};
+</script>
+</body>
+</html>
